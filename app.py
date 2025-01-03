@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go  # Import Graph Objects for adding traces
 from io import BytesIO
 import re
 
@@ -172,24 +173,46 @@ def main():
         return
     
     # Layout using Tabs for better organization
-    tabs = st.tabs(["Monthly Offences", "Offence Types", "Trends Comparison", "Data Download"])
+    tabs = st.tabs(["Monthly Offences", "Offence Types", "Trends Comparison", "Offence Heat Map", "Data Download"])
     
     with tabs[0]:
         st.subheader('Monthly Offences')
         monthly_offences = filtered_data.groupby('Month')['Offence count'].sum().reset_index()
+        
+        # Sort the data by Month to ensure correct order
+        monthly_offences = monthly_offences.sort_values('Month')
+        
+        # Calculate the 3-Month Moving Average
+        monthly_offences['Moving Average'] = monthly_offences['Offence count'].rolling(window=3).mean()
+        
+        # Create the initial line chart for Offence Count
         fig1 = px.line(
             monthly_offences,
             x='Month',
             y='Offence count',
             markers=True,
-            title='Monthly Offences',
+            title='Monthly Offences with 3-Month Moving Average',
             labels={'Offence count': 'Number of Offences', 'Month': 'Month'}
         )
-        # Set y-axis origin to 0
+        
+        # Add the Moving Average trace
+        fig1.add_trace(
+            go.Scatter(
+                x=monthly_offences['Month'],
+                y=monthly_offences['Moving Average'],
+                mode='lines',
+                name='3-Month Moving Average',
+                line=dict(color='orange', dash='dash')
+            )
+        )
+        
+        # Set y-axis origin to 0 and adjust layout
         fig1.update_layout(
             xaxis_tickangle=-45,
-            yaxis=dict(rangemode='tozero')  # Ensures y-axis starts at 0
+            yaxis=dict(rangemode='tozero'),  # Ensures y-axis starts at 0
+            legend=dict(x=0, y=1.0)
         )
+        
         st.plotly_chart(fig1, use_container_width=True)
         
     with tabs[1]:
@@ -237,6 +260,37 @@ def main():
         st.plotly_chart(fig3, use_container_width=True)
     
     with tabs[3]:
+        st.subheader('Offence Heat Map')
+        
+        # Aggregate total Level 2 offences per suburb
+        heatmap_data = data.groupby(['Offence Level 2 Description', 'Suburb - Incident'])['Offence count'].sum().reset_index()
+        
+        # Pivot the data to have Level 2 offences as rows and suburbs as columns
+        heatmap_pivot = heatmap_data.pivot(index='Offence Level 2 Description', columns='Suburb - Incident', values='Offence count').fillna(0)
+        
+        # Optional: Sort the offences and suburbs for better visualization
+        heatmap_pivot = heatmap_pivot.sort_index()
+        
+        # Create the heat map
+        fig_heatmap = px.imshow(
+            heatmap_pivot,
+            labels=dict(x="Suburb", y="Level 2 Offence", color="Total Offences"),
+            x=heatmap_pivot.columns,
+            y=heatmap_pivot.index,
+            color_continuous_scale='Viridis',
+            aspect="auto",
+            title="Heat Map of Level 2 Offences Across Suburbs"
+        )
+        
+        fig_heatmap.update_layout(
+            xaxis_tickangle=-45,
+            yaxis=dict(tickmode='linear'),
+            coloraxis_colorbar=dict(title="Total Offences")
+        )
+        
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+    
+    with tabs[4]:
         st.subheader('Download Data and Visualizations')
         csv_buffer = download_csv(filtered_data)
         st.download_button(
@@ -256,6 +310,14 @@ def main():
             mime='image/png'
         )
         # Similarly, add download buttons for other plots if desired
+        # Example for Heat Map
+        fig_heatmap_bytes = fig_heatmap.to_image(format="png")
+        st.download_button(
+            label="Download Offence Heat Map",
+            data=fig_heatmap_bytes,
+            file_name=f'offence_heatmap_{sanitized_suburb}.png',
+            mime='image/png'
+        )
     
     # Footer
     st.markdown("---")
