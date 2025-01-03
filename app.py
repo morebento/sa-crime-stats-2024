@@ -1,38 +1,69 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go  # Import Graph Objects for adding traces
+import plotly.graph_objects as go
 from io import BytesIO
 import re
 
-# Set Streamlit page configuration
+# ----------------------------
+# Streamlit Page Configuration
+# ----------------------------
 st.set_page_config(
     page_title="Crime Data Analysis for Selected Suburbs",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        'About': "### Crime Data Analysis App\nDeveloped by @morebento July 2024\n\nVisualization of SAPOL crime statistics from the SA Government Data Portal."
+        'About': """
+        ### Crime Data Analysis App
+        Developed by @morebento July 2024
+
+        Visualization of SAPOL crime statistics from the SA Government Data Portal.
+        """
     }
 )
 
+# ----------------------------
+# Data Loading and Caching
+# ----------------------------
 @st.cache_data
 def load_data(file_path: str) -> pd.DataFrame:
     """
-    Loads and preprocesses the crime data from a CSV file.
+    Loads and preprocesses the crime data from a Parquet file.
     Caches the data to optimize performance.
-    
+
     Parameters:
-    - file_path (str): Path to the CSV file.
+    - file_path (str): Path to the Parquet file.
 
     Returns:
     - pd.DataFrame: Preprocessed crime data.
     """
-    data = pd.read_csv(file_path)
-    # Convert 'Reported Date' to datetime
+    dtype = {
+        'Offence count': 'int32',
+        'Offence Level 1 Description': 'category',
+        'Offence Level 2 Description': 'category',
+        'Offence Level 3 Description': 'category',
+        'Suburb - Incident': 'category'
+        # Add other columns and their types as necessary
+    }
+    # Load data from Parquet
+    data = pd.read_parquet(file_path, engine='pyarrow')
+    
+    # Convert data types for optimization
+    for col, col_type in dtype.items():
+        if col in data.columns:
+            data[col] = data[col].astype(col_type)
+    
+    # Ensure 'Reported Date' is in datetime format
     data['Reported Date'] = pd.to_datetime(data['Reported Date'], format='%d/%m/%Y')
+    
     # Extract month for analysis
     data['Month'] = data['Reported Date'].dt.to_period('M').astype(str)
+    
     return data
+
+# ----------------------------
+# Helper Functions
+# ----------------------------
 
 def filter_offence_levels(data: pd.DataFrame, selected_level1: str, selected_level2: str) -> pd.DataFrame:
     """
@@ -82,22 +113,19 @@ def download_csv(data: pd.DataFrame) -> BytesIO:
     csv_buffer.seek(0)
     return csv_buffer
 
+# ----------------------------
+# Main Application Function
+# ----------------------------
 def main():
-    # Load pre-filtered data
-    file_path = 'filtered-data-sa-crime.csv'  # Path to the filtered CSV
+    # ----------------------------
+    # Load Data
+    # ----------------------------
+    file_path = 'filtered-data-sa-crime.parquet'  # Path to the Parquet file
     data = load_data(file_path)
     
+    # ----------------------------
     # Sidebar Configuration
-    st.sidebar.title('Instructions')
-    st.sidebar.markdown("""
-    Visualization of SAPOL crime statistics from the SA Government Data Portal. 
-    [View the dataset here](https://data.sa.gov.au/data/dataset/crime-statistics). 
-    Data covers July 2023 to September 2024 only.
-    
-    **Filter Options:**
-    - Select a suburb and offence levels to display specific charts.
-    """)
-    
+    # ----------------------------
     st.sidebar.title('Filter Options')
     
     # Dynamic Suburb Selection (Single Selection)
@@ -146,13 +174,17 @@ def main():
         help="Select a Level 3 offence to further filter the data."
     )
     
+    # ----------------------------
     # Apply Filters
+    # ----------------------------
     filtered_data = data[data['Suburb - Incident'] == selected_suburb]
     filtered_data = filter_offence_levels(filtered_data, selected_level1, selected_level2)
     if selected_level3 != 'All Data':
         filtered_data = filtered_data[filtered_data['Offence Level 3 Description'] == selected_level3]
     
+    # ----------------------------
     # Display Summary Statistics
+    # ----------------------------
     st.markdown("## Summary Statistics")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -167,19 +199,101 @@ def main():
     
     st.markdown("---")
     
-    # Check if filtered data is empty
+    # ----------------------------
+    # Check if Filtered Data is Empty
+    # ----------------------------
     if filtered_data.empty:
         st.warning("No data available for the selected filters. Please adjust your selections.")
         return
     
-    # Layout using Tabs for better organization
-    tabs = st.tabs(["Monthly Offences", "Offence Types", "Trends Comparison", "Offence Heat Map", "Data Download"])
+    # ----------------------------
+    # Layout Using Tabs
+    # ----------------------------
+    tabs = st.tabs(["Instructions", "Monthly Offences", "Offence Types", "Trends Comparison", "Offence Heat Map", "Data Download"])
     
+    # ----------------------------
+    # Tab 1: Instructions
+    # ----------------------------
     with tabs[0]:
+        st.title("Instructions")
+        st.markdown("""
+        ### Welcome to the Crime Data Analysis App
+
+        This application allows you to explore and analyze crime statistics for selected suburbs in South Australia. Below is a guide on how to navigate and utilize the app effectively.
+
+        #### **Sidebar Filters**
+
+        - **Select Suburb:**
+          - Choose a specific suburb from the dropdown to analyze its crime data.
+        
+        - **Select Level 1 Offence:**
+          - Filter the data based on high-level offence categories.
+          - Selecting "All Data" includes all Level 1 offences.
+        
+        - **Select Level 2 Offence:**
+          - Further refine your analysis by selecting a more specific offence category under Level 1.
+          - If "All Data" is selected at Level 1, this will include all Level 2 offences.
+        
+        - **Select Level 3 Offence:**
+          - Drill down to the most specific offence categories.
+          - Similar to Level 2, selecting "All Data" will include all Level 3 offences.
+
+        #### **Tabs Overview**
+
+        - **Monthly Offences:**
+          - Displays a line chart showing the total number of offences reported each month.
+          - Includes a 3-month moving average to highlight trends over time.
+        
+        - **Offence Types:**
+          - Provides a pie chart distribution of offences based on the selected offence level.
+          - Choose between Level 1, Level 2, or Level 3 offences to visualize their distribution.
+        
+        - **Trends Comparison:**
+          - Compares monthly offence trends across all suburbs.
+          - Useful for identifying patterns or anomalies in different areas.
+        
+        - **Offence Heat Map:**
+          - Presents a heat map with Level 2 offences on the Y-axis and suburbs on the X-axis.
+          - The color intensity represents the total number of offences, allowing for quick identification of hotspots.
+        
+        - **Data Download:**
+          - Enables you to download the filtered crime data as a CSV file.
+          - Also provides options to download the visualizations (charts and heat maps) as PNG images.
+
+        #### **How to Use the App**
+
+        1. **Apply Filters:**
+           - Start by selecting the suburb and offence levels from the sidebar to filter the data according to your interests.
+
+        2. **Explore Visualizations:**
+           - Navigate through the tabs to view different aspects of the data.
+           - Use the interactive charts to hover over data points for more detailed information.
+
+        3. **Download Data and Visualizations:**
+           - In the "Data Download" tab, use the provided buttons to export your data and charts for offline analysis or reporting.
+
+        #### **Tips for Effective Analysis**
+
+        - **Comparative Analysis:**
+          - Use the "Trends Comparison" tab to compare crime trends across multiple suburbs, helping identify areas with increasing or decreasing offences.
+
+        - **Identifying Hotspots:**
+          - The "Offence Heat Map" is particularly useful for pinpointing suburbs with high concentrations of specific offences.
+
+        - **Long-Term Trends:**
+          - The moving average in the "Monthly Offences" chart smooths out short-term fluctuations, revealing underlying trends over longer periods.
+
+
+        """)
+
+    # ----------------------------
+    # Tab 2: Monthly Offences
+    # ----------------------------
+    with tabs[1]:
         st.subheader('Monthly Offences')
         monthly_offences = filtered_data.groupby('Month')['Offence count'].sum().reset_index()
         
-        # Sort the data by Month to ensure correct order
+        # Sort the data by Month to ensure correct chronological order
         monthly_offences = monthly_offences.sort_values('Month')
         
         # Calculate the 3-Month Moving Average
@@ -214,11 +328,18 @@ def main():
         )
         
         st.plotly_chart(fig1, use_container_width=True)
-        
-    with tabs[1]:
+    
+    # ----------------------------
+    # Tab 3: Offence Types Distribution
+    # ----------------------------
+    with tabs[2]:
         st.subheader('Offence Types Distribution')
         offence_levels = ['Level 1', 'Level 2', 'Level 3']
-        selected_level = st.selectbox('Select Offence Level for Distribution', options=offence_levels, help="Choose the offence level to visualize distribution.")
+        selected_level = st.selectbox(
+            'Select Offence Level for Distribution', 
+            options=offence_levels, 
+            help="Choose the offence level to visualize distribution."
+        )
         
         if selected_level == 'Level 1':
             distribution = filtered_data['Offence Level 1 Description'].value_counts().reset_index()
@@ -242,10 +363,12 @@ def main():
         )
         st.plotly_chart(fig2, use_container_width=True)
     
-    with tabs[2]:
+    # ----------------------------
+    # Tab 4: Trends Comparison
+    # ----------------------------
+    with tabs[3]:
         st.subheader('Monthly Offence Trends Comparison Across Suburbs')
-        # Since only one suburb is selected, this chart will display a single line.
-        # To maintain functionality, we can still plot trends across all pre-filtered suburbs.
+        # Aggregate data for all suburbs to enable comparison
         suburb_trends = data.groupby(['Suburb - Incident', 'Month'])['Offence count'].sum().reset_index()
         fig3 = px.line(
             suburb_trends,
@@ -259,7 +382,10 @@ def main():
         fig3.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig3, use_container_width=True)
     
-    with tabs[3]:
+    # ----------------------------
+    # Tab 5: Offence Heat Map
+    # ----------------------------
+    with tabs[4]:
         st.subheader('Offence Heat Map')
         
         # Aggregate total Level 2 offences per suburb
@@ -271,7 +397,7 @@ def main():
         # Optional: Sort the offences and suburbs for better visualization
         heatmap_pivot = heatmap_pivot.sort_index()
         
-        # Create the heat map
+        # Create the heat map using Plotly Express
         fig_heatmap = px.imshow(
             heatmap_pivot,
             labels=dict(x="Suburb", y="Level 2 Offence", color="Total Offences"),
@@ -290,7 +416,10 @@ def main():
         
         st.plotly_chart(fig_heatmap, use_container_width=True)
     
-    with tabs[4]:
+    # ----------------------------
+    # Tab 6: Data Download
+    # ----------------------------
+    with tabs[5]:
         st.subheader('Download Data and Visualizations')
         csv_buffer = download_csv(filtered_data)
         st.download_button(
@@ -309,8 +438,6 @@ def main():
             file_name=f'monthly_offences_{sanitized_suburb}.png',
             mime='image/png'
         )
-        # Similarly, add download buttons for other plots if desired
-        # Example for Heat Map
         fig_heatmap_bytes = fig_heatmap.to_image(format="png")
         st.download_button(
             label="Download Offence Heat Map",
@@ -318,10 +445,16 @@ def main():
             file_name=f'offence_heatmap_{sanitized_suburb}.png',
             mime='image/png'
         )
+        # Add additional download buttons for other plots if desired
     
+    # ----------------------------
     # Footer
+    # ----------------------------
     st.markdown("---")
     st.markdown("© morebento January 2025")
 
+# ----------------------------
+# Run the Application
+# ----------------------------
 if __name__ == "__main__":
     main()
